@@ -1,0 +1,23 @@
+{
+  "name": "jsrs",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "NovaSagittarii",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^0.19.2",
+    "discord.js": "^12.2.0",
+    "dotenv": "^8.2.0",
+    "fs": "0.0.1-security",
+    "jsdom": "^16.2.2",
+    "mdbg": "github:pepebecker/mdbg",
+    "mongodb": "^3.5.9",
+    "pinyin-convert": "^1.11.0",
+    "wanakana": "^4.0.2",
+    "zhuyin": "^1.11.0"
+  }
+}
