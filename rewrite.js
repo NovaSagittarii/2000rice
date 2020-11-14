@@ -17,7 +17,7 @@ const WAIT_INTERVALS = process.env.WAIT_INTERVALS.split(',').map(int => parseInt
 const RKV_EMBED_COLORING = {"radical": 0x3498db, "kanji": 0x9b59b6, "vocab": 0xe91e63};
 const SRS_STAGE_NAMING = ["Unknown", "Practiced", "Familiar", "Novice", "Intermediate", "Adept", "Proficient", "Specialist", "Expert", "Mastered"];
 const SRS_STAGE_ICON = ["<:s0:733903368073773058>","<:s1:733903368023441468>","<:s2:733903368036024351>","<:s3:733903368010989639>","<:s4:733903367990149261>","<:s5:733903367893418126>", "<:s6:747167239198867476>", "<:s7:747167238926368871>", "<:s8:747169730066120754>", "<:s9:747169730082897990>"];
-const RA = 0, KA = 1, VO = 2, HSK_RA = 3, SC = 4, HSK = 5;
+const RA = 0, KA = 1, VO = 2, HSK_RA = 3, SC = 4, HSK_VO = 5;
 const RKV = ["radical", "kanji", "vocab", "radical", "sc", "hsk"];
 const TYPES = {
   /*
@@ -85,11 +85,13 @@ const TYPES = {
     db: "tc"
   },
 };
-Object.keys(TYPES).forEach(t => TYPES[TYPES[t].id] = Object.assign({txt: t}, TYPES[t])); // console.log(TYPES);
+Object.keys(TYPES).forEach(t => TYPES[TYPES[t].id] = Object.assign({txt: t}, TYPES[t]));
 const ACRONYM = {
+  "on": "onyomi",
+  "ku": "kunyomi",
   "py": "pinyin",
   "en": "meaning"
-}
+};
 const NOT_STARTED_YET = -1, LEARN = 0, REVIEW = 1;
 let db;
 const lessons = {};
@@ -142,7 +144,7 @@ function SRSObj(){
 function queuedLesson(char, type, lessonType, time){
   this.char = char;
   this.type = type;
-  this.time = time || Date.now();
+  this.time = time;
   this.lessonType = lessonType;
 }
 function newSRSLevel(SRSObj, correct){
@@ -150,6 +152,111 @@ function newSRSLevel(SRSObj, correct){
 }
 function formatLv(lv){
   return `${String.fromCharCode(945+Math.floor(lv/5))}-${"i ii iii iv v vi vii viii ix x".split(' ')[lv%5]}`;
+}
+
+// function
+// https://r.yellowbridge.com/sounds/py-cbr/shi1.mp3
+
+function infoLookup(type, char){
+  return new Promise(async (response, rej) => {
+    const res = await db.collection(RKV[type]).findOne({_id: char});
+    switch(type){
+      case RA:
+      case HSK_RA:
+        response({embed: {
+          title: `New Radical Lesson`,
+          fields: [
+            new Field("Radical", char),
+            new Field("Definition", res.meaning),
+            new Field("References", `[Wiktionary](https://en.wiktionary.org/wiki/${encodeURI(char)})`)
+          ],
+          color: 0x3498db,
+          thumbnail: {
+            url: `http://en.ikanji.jp/user_data/images/upload/character/original/${encodeURI(char).replace(/%/g, '')}.png`
+          }
+        }});
+        break;
+      case KA:
+        response({embed: {
+          title: `New Kanji Lesson`,
+          fields: [
+            new Field("Kanji", `${char}\u3010${res.radical}\u3011`, true),
+            new Field("Onyomi", res.onyomi.replace(/,/g, '\u3001'), true),
+            new Field("Kunyomi", res.kunyomi.replace(/,/g, '\u3001'), true),
+            new Field("Definition", res.meaning.replace(/,/g, ', ')),
+            new Field("Mnemonic/Hint", res.mnemonic),
+            new Field("Examples", res.examples.map(ex => ex.split('|')[0]).join('\n'), true),
+            new Field("Meaning", res.examples.map(ex => ex.split('|')[1]).join('\n'), true),
+            new Field("References", `[Jisho](https://jisho.org/search/${encodeURI(char)})\u30fb[KanjiAlive](https://app.kanjialive.com/${encodeURI(char)})\u30fb[Tangorin](https://tangorin.com/kanji/${encodeURI(char)})\u30fb[Wiktionary](https://en.wiktionary.org/wiki/${encodeURI(char)})`)
+          ],
+          color: 0x9b59b6,
+          thumbnail: {
+            url: `http://en.ikanji.jp/user_data/images/upload/character/original/${encodeURI(char).replace(/%/g, '')}.png`
+          }
+        }});
+        break;
+      case VO:
+        const VO_EMBED = {
+          embed: {
+            title: `New Vocabulary Lesson: ${char}`,
+            description: `Part of Speech: ${res.lexicalClass}`,
+            fields: [
+              new Field("Meaning", res.meaning.replace(/,/g, ", "), true),
+              new Field("Reading", res.reading.replace(/,/g, ", "), true),
+              new Field("Meaning Explanation", res.meaningExplanation || "n/a"),
+              new Field("Reading Explanation", res.readingExplanation || "n/a"),
+              new Field("References", `[Jisho](https://jisho.org/search/${encodeURI(char)})\u30fb[Tangorin](https://tangorin.com/definition/${encodeURI(char)})\u30fb[WaniKani](https://www.wanikani.com/vocabulary/${encodeURI(char)})\u30fb[Wiktionary](https://en.wiktionary.org/wiki/${encodeURI(char)})`)
+            ],
+            color: 0xe91e63
+          }
+        };
+        if(res.recording !== null) VO_EMBED.files = [res.recording.split(',')[0]];
+        response(VO_EMBED);
+        break;
+      case SC:
+        const SC_EMBED = {embed: {
+          title: `New Hanzi Lesson`,
+          fields: [
+            new Field("Hanzi", `${char}\u3010${res.ra}\u3011`, true),
+            new Field("Pinyin", '`'+res.py.join('\u3001')+'`', true),
+            new Field("Zhuyin", (await zyc(res.py.join(' '))).join('\u3001').replace(/`/g, "\\`"), true),
+            new Field("Definition", res.en),
+            new Field("Context Examples", res.ex.map(ex => ex.replace('\u3010', "\u3010`").replace('\u3011|', "`\u3011*").trim() + '*').join('\n') || "n/a"),
+            new Field("References", `[Cojak](http://www.cojak.org/index.php?function=code_lookup&term=${char.charCodeAt(0).toString(16).toUpperCase()})\u30fb[MDBG](https://www.mdbg.net/chinese/dictionary?wdqb=${encodeURI(char)})\u30fb[Purple Culture](https://www.purpleculture.net/dictionary-details/?word=${encodeURI(char)})\u30fb[Wiktionary](https://en.wiktionary.org/wiki/${encodeURI(char)})`)
+          ],
+          color: 0x9b59b6
+          },
+          // files: ["https://r.yellowbridge.com/sounds/py-cbr/" + (await pyc(res.py)).split(' ').map(p => p.match(/[1-4]$/) ? p : p+5).join('') + ".mp3"]
+        };
+        if(res.img) SC_EMBED.embed.thumbnail = { url: res.img };
+        else {
+          SC_EMBED.files = [{
+            attachment: `https://dictionary.writtenchinese.com/giffile.action?&localfile=true&fileName=${encodeURI(encodeURI(char))}.gif`,
+            name: `so.gif`
+          }];
+        }
+        if(!res.img) await db.collection('sc').updateOne({_id: char}, {$set: { img: embed.attachments.array()[0].url }}); // don't update if one exists already
+        response(SC_EMBED);
+        break;
+      case HSK:
+        response({
+          embed: {
+            title: `New Vocabulary Lesson`,
+            fields: [
+              new Field("Term", char, true),
+              new Field("Pinyin", '`'+res.py+'`', true),
+              new Field("Zhuyin", (await zyc(res.py)).join('\n').replace(/`/g, "\\`"), true),
+              new Field("Definition", res.en),
+              new Field("Examples", res.ex.map(ex => ex.replace('\u3010', '\n').replace('\u3011', '').replace('|', '\n*"').trim() + '"*').join('\n\n') || "n/a", true),
+              new Field("References", `[MDBG](https://www.mdbg.net/chinese/dictionary?wdqb=${encodeURI(char)})\u30fb[Purple Culture](https://www.purpleculture.net/dictionary-details/?word=${encodeURI(char)})\u30fb[Written Chinese](https://dictionary.writtenchinese.com/#sk=${encodeURI(char)}&svt=pinyin)\u30fb[Wiktionary](https://en.wiktionary.org/wiki/${encodeURI(char)})`)
+            ],
+            color: 0xe91e63
+          },
+          files: ["https://dictionary.writtenchinese.com/sounds/" + (await pyc(res.py)).split(' ').map(p => p.match(/[1-4]$/) ? p : p+5).join('') + ".mp3"]
+        });
+        break;
+    }
+  });
 }
 
 function Lesson(uid, lang, message, contents){
@@ -176,104 +283,7 @@ Lesson.prototype.advance = async function(message){
     // console.log(currentLesson); // DEBUG
     this.prevState = currentLesson.lessonType;
     if(currentLesson.lessonType === LEARN){
-      const lessonMessage = await (async function(){
-        const res = await db.collection(RKV[currentLesson.type]).findOne({_id: currentLesson.char});
-        switch(currentLesson.type){
-          case RA:
-          case HSK_RA:
-            return message.channel.send({embed: {
-              title: `New Radical Lesson`,
-              fields: [
-                new Field("Radical", currentLesson.char),
-                new Field("Definition", res.meaning),
-                new Field("References", `[Wiktionary](https://en.wiktionary.org/wiki/${encodeURI(currentLesson.char)})`)
-              ],
-              color: 0x3498db,
-              thumbnail: {
-                url: `http://en.ikanji.jp/user_data/images/upload/character/original/${encodeURI(currentLesson.char).replace(/%/g, '')}.png`
-              }
-            }});
-            break;
-          case KA:
-            return message.channel.send({embed: {
-              title: `New Kanji Lesson`,
-              fields: [
-                new Field("Kanji", `${currentLesson.char}\u3010${res.radical}\u3011`, true),
-                new Field("Onyomi", res.onyomi.replace(/,/g, '\u3001'), true),
-                new Field("Kunyomi", res.kunyomi.replace(/,/g, '\u3001'), true),
-                new Field("Definition", res.meaning.replace(/,/g, ', ')),
-                new Field("Mnemonic/Hint", res.mnemonic),
-                new Field("Examples", res.examples.map(ex => ex.split('|')[0]).join('\n'), true),
-                new Field("Meaning", res.examples.map(ex => ex.split('|')[1]).join('\n'), true),
-                new Field("References", `[Jisho](https://jisho.org/search/${encodeURI(currentLesson.char)})\u30fb[KanjiAlive](https://app.kanjialive.com/${encodeURI(currentLesson.char)})\u30fb[Tangorin](https://tangorin.com/kanji/${encodeURI(currentLesson.char)})\u30fb[Wiktionary](https://en.wiktionary.org/wiki/${encodeURI(currentLesson.char)})`)
-              ],
-              color: 0x9b59b6,
-              thumbnail: {
-                url: `http://en.ikanji.jp/user_data/images/upload/character/original/${encodeURI(currentLesson.char).replace(/%/g, '')}.png`
-              }
-            }});
-            break;
-          case VO:
-            const VO_EMBED = {
-              embed: {
-                title: `New Vocabulary Lesson: ${currentLesson.char}`,
-                description: `Part of Speech: ${res.lexicalClass}`,
-                fields: [
-                  new Field("Meaning", res.meaning.replace(/,/g, ", "), true),
-                  new Field("Reading", res.reading.replace(/,/g, ", "), true),
-                  new Field("Meaning Explanation", res.meaningExplanation || "n/a"),
-                  new Field("Reading Explanation", res.readingExplanation || "n/a"),
-                  new Field("References", `[Jisho](https://jisho.org/search/${encodeURI(currentLesson.char)})\u30fb[Tangorin](https://tangorin.com/definition/${encodeURI(currentLesson.char)})\u30fb[WaniKani](https://www.wanikani.com/vocabulary/${encodeURI(currentLesson.char)})\u30fb[Wiktionary](https://en.wiktionary.org/wiki/${encodeURI(currentLesson.char)})`)
-                ],
-                color: 0xe91e63
-              }
-            };
-            if(res.recording !== null) VO_EMBED.files = [res.recording.split(',')[0]];
-            return message.channel.send(VO_EMBED);
-            break;
-          case SC:
-            const SC_EMBED = {embed: {
-              title: `New Hanzi Lesson`,
-              fields: [
-                new Field("Hanzi", `${currentLesson.char}\u3010${res.ra}\u3011`, true),
-                new Field("Pinyin", '`'+res.py.join('\u3001')+'`', true),
-                new Field("Zhuyin", (await zyc(res.py.join(' '))).join('\u3001').replace(/`/g, "\\`"), true),
-                new Field("Definition", res.en),
-                new Field("Context Examples", res.ex.map(ex => ex.replace('\u3010', "\u3010`").replace('\u3011|', "`\u3011*").trim() + '*').join('\n') || "n/a"),
-                new Field("References", `[Cojak](http://www.cojak.org/index.php?function=code_lookup&term=${currentLesson.char.charCodeAt(0).toString(16).toUpperCase()})\u30fb[MDBG](https://www.mdbg.net/chinese/dictionary?wdqb=${encodeURI(currentLesson.char)})\u30fb[Purple Culture](https://www.purpleculture.net/dictionary-details/?word=${encodeURI(currentLesson.char)})\u30fb[Wiktionary](https://en.wiktionary.org/wiki/${encodeURI(currentLesson.char)})`)
-              ],
-              color: 0x9b59b6
-            }};
-            if(res.img) SC_EMBED.embed.thumbnail = { url: res.img };
-            else {
-              SC_EMBED.files = [{
-                attachment: `https://dictionary.writtenchinese.com/giffile.action?&localfile=true&fileName=${encodeURI(encodeURI(currentLesson.char))}.gif`,
-                name: `so.gif`
-              }];
-            }
-            embed = await message.channel.send(SC_EMBED);
-            if(!res.img) await db.collection('sc').updateOne({_id: currentLesson.char}, {$set: { img: embed.attachments.array()[0].url }}); // don't update if one exists already
-            return embed;
-            break;
-          case HSK:
-            return message.channel.send({
-              embed: {
-                title: `New Vocabulary Lesson`,
-                fields: [
-                  new Field("Term", currentLesson.char, true),
-                  new Field("Pinyin", '`'+res.py+'`', true),
-                  new Field("Zhuyin", (await zyc(res.py)).join('\n').replace(/`/g, "\\`"), true),
-                  new Field("Definition", res.en),
-                  new Field("Examples", res.ex.map(ex => ex.replace('\u3010', '\n').replace('\u3011', '').replace('|', '\n*"').trim() + '"*').join('\n\n') || "n/a", true),
-                  new Field("References", `[MDBG](https://www.mdbg.net/chinese/dictionary?wdqb=${encodeURI(currentLesson.char)})\u30fb[Purple Culture](https://www.purpleculture.net/dictionary-details/?word=${encodeURI(currentLesson.char)})\u30fb[Written Chinese](https://dictionary.writtenchinese.com/#sk=${encodeURI(currentLesson.char)}&svt=pinyin)\u30fb[Wiktionary](https://en.wiktionary.org/wiki/${encodeURI(currentLesson.char)})`)
-                ],
-                color: 0xe91e63
-              },
-              files: ["https://dictionary.writtenchinese.com/sounds/" + (await pyc(res.py)).split(' ').map(p => p.match(/[1-4]$/) ? p : p+5).join('') + ".mp3"]
-            });
-            break;
-        }
-      })();
+      const lessonMessage = message.channel.send(await infoLookup(currentLesson.type, currentLesson.char));
       lessonMessage.react("\u23ed\ufe0f");
       this.message = lessonMessage;
       this.contents.push(new queuedLesson(currentLesson.char, currentLesson.type, REVIEW, currentLesson.time));
@@ -312,7 +322,7 @@ Lesson.prototype.advance = async function(message){
             break;
           case HSK:
             if(currentLesson.requested.text === "en"){
-              if(res.en.toLowerCase().split('; ').includes(message.content.trim().toLowerCase())) correct = true;
+              if(res.en.split('; ').includes(message.content.trim())) correct = true;
               solution = `One of the following: ${res.en}`;
             }else{
               const str = message.content.trim().toLowerCase();
@@ -347,7 +357,7 @@ Lesson.prototype.advance = async function(message){
             }
           }else{
             for(let i = 0; i < usr.lessons[this.lang].length; i ++){
-              // if(i === MAXIMUM_LESSON_SIZE) throw "missing lessons?";
+              if(i === MAXIMUM_LESSON_SIZE) throw "missing lessons?";
               if(usr.lessons[this.lang][i].char === currentLesson.char && usr.lessons[this.lang][i].type === currentLesson.type){
                 const PAYLOAD = {};
                 const SRSDATA = usr[TYPES[currentLesson.type].txt][currentLesson.char];
@@ -356,16 +366,16 @@ Lesson.prototype.advance = async function(message){
                 SRSDATA.incorrect = 0;
                 PAYLOAD[`${TYPES[currentLesson.type].txt}.${currentLesson.char}`] = SRSDATA;
                 usr.lessons[this.lang].splice(i, 1);
-                if(SRSDATA.level < 9) usr.lessons[this.lang].push(new queuedLesson(currentLesson.char, currentLesson.type, SRSDATA.level > 1 ? REVIEW : LEARN, Date.now() + WAIT_INTERVALS[SRSDATA.level]));
+                if(SRSDATA.level < 9) usr.lessons[this.lang].push(new queuedLesson(currentLesson.char, currentLesson.type, SRSDATA.level > 0 ? REVIEW : LEARN, Date.now() + WAIT_INTERVALS[SRSDATA.level]));
                 if(SRSDATA.level === 5){
                   let pass = true, checks;
                   switch(currentLesson.type){
                     case RA:
                       checks = (await db.collection('radical').findOne({_id: `lv${usr.next.kanji}`})).content;
                       for(let i = 0; i < checks.length; i ++){
-                        if(!usr.radical[checks[i]] || usr.radical[checks[i]].level < 5){
+                        if(usr.radical[checks[i]].level < 5){
                           pass = false;
-                          log.error(`FAILED CHECK: Radical ${checks[i]} is at level ${usr.radical[checks[i]] ? usr.radical[checks[i]].level : "DNE"}`);
+                          log.error(`FAILED CHECK: Radical ${checks[i]} is at level ${usr.radical[checks[i]].level}`);
                           break;
                         }
                       }
@@ -380,28 +390,27 @@ Lesson.prototype.advance = async function(message){
                       }
                       break;
                     case KA:
-                      checks = (await db.collection('kanji').findOne({_id: `lv${usr.next.kanji-1}`})).content;
+                      checks = (await db.collection('kanji').findOne({_id: `lv${usr.next.vocab}`})).content;
                       for(let i = 0; i < checks.length; i ++){
-                        if(!usr.kanji[checks[i]] || usr.kanji[checks[i]].level < 5){
+                        if(usr.kanji[checks[i]].level < 5){
                           pass = false;
-                          log.error(`FAILED CHECK: Kanji ${checks[i]} is at level ${usr.kanji[checks[i]] ? usr.kanji[checks[i]].level : "DNE"}`);
+                          log.error(`FAILED CHECK: Kanji ${checks[i]} is at level ${usr.kanji[checks[i]].level}`);
                           break;
                         }
                       }
                       if(pass){
                         log.info(`User ${usr._id} passed Kanji stage ${usr.next.vocab}`);
                         this.announcement = `**You passed Stage ${formatLv(usr.next.kanji-2)} Kanji!**`;
-
-                        const nextRadicals = await db.collection('radical').findOne({_id: `lv${usr.next.radical}`});
-                        nextRadicals.content.forEach(char => {
-                          PAYLOAD[`radical.${char}`]= new SRSObj();
-                          usr.lessons[this.lang].push(new queuedLesson(char, RA, LEARN, Date.now()));
-                        });
                         (await db.collection('vocab').findOne({_id: `lv${usr.next.vocab}`})).content.forEach(char => {
                           PAYLOAD[`vocab.${char}`]= new SRSObj();
                           usr.lessons[this.lang].push(new queuedLesson(char, VO, LEARN, Date.now()));
                         });
                         PAYLOAD[`next.vocab`] = usr.next.vocab + 1;
+                        const nextRadicals = await db.collection('radical').findOne({_id: `lv${usr.next.radical}`});
+                        nextRadicals.content.forEach(char => {
+                          PAYLOAD[`radical.${char}`]= new SRSObj();
+                          usr.lessons[this.lang].push(new queuedLesson(char, RA, LEARN, Date.now()));
+                        });
                         PAYLOAD[`next.radical`] = usr.next.radical + 1;
                         if(nextRadicals.content.length === 0){
                           (await db.collection('kanji').findOne({_id: `lv${usr.next.kanji}`})).content.forEach(char => {
@@ -413,31 +422,17 @@ Lesson.prototype.advance = async function(message){
                         }else this.announcement += " (New radicals and vocabulary unlocked!)";
                       }
                       break;
-                    case VO:
-                      checks = (await db.collection('vocab').findOne({_id: `lv${usr.next.vocab-1}`})).content;
-                      for(let i = 0; i < checks.length; i ++){
-                        if(!usr.vocab[checks[i]] || usr.vocab[checks[i]].level < 5){
-                          pass = false;
-                          log.error(`FAILED CHECK: Vocab ${checks[i]} is at level ${usr.vocab[checks[i]] ? usr.vocab[checks[i]].level : "DNE"}`);
-                          break;
-                        }
-                      }
-                      if(pass){
-                        log.info(`User ${usr._id} passed Vocab stage ${usr.next.vocab-1}`);
-                        this.announcement = `**You passed Stage ${formatLv(usr.next.vocab-2)} Vocabulary!**`;
-                      }
-                      break;
                     case HSK_RA:
-                      checks = (await db.collection('radical').findOne({_id: `lv${usr.next.sc}`})).scn;
+                      checks = (await db.collection('radical').findOne({_id: `lv${usr.next.kanji}`})).scn;
                       for(let i = 0; i < checks.length; i ++){
-                        if(!usr.hskr[checks[i]] || usr.hskr[checks[i]].level < 5){
+                        if(usr.hskr[checks[i]].level < 5){
                           pass = false;
-                          log.error(`FAILED CHECK: Radical [HSK] ${checks[i]} is at level ${usr.hskr[checks[i]] ? usr.hskr[checks[i]].level : "DNE"}`);
+                          log.error(`FAILED CHECK: Radical [HSK] ${checks[i]} is at level ${usr.hskr[checks[i]].level}`);
                           break;
                         }
                       }
                       if(pass){
-                        log.info(`User ${usr._id} passed Radical stage ${usr.next.sc}`);
+                        log.info(`User ${usr._id} passed Radical stage ${usr.next.kanji}`);
                         this.announcement = `**You passed Stage ${formatLv(usr.next.hskr-2)} Radicals!** (New hanzi unlocked!)`;
                         (await db.collection('sc').findOne({_id: `lv${usr.next.sc}`})).content.forEach(char => {
                           PAYLOAD[`sc.${char}`]= new SRSObj();
@@ -449,9 +444,9 @@ Lesson.prototype.advance = async function(message){
                     case SC:
                       checks = (await db.collection('sc').findOne({_id: `lv${usr.next.hsk}`})).content;
                       for(let i = 0; i < checks.length; i ++){
-                        if(!usr.sc[checks[i]] || usr.sc[checks[i]].level < 5){
+                        if(usr.sc[checks[i]].level < 5){
                           pass = false;
-                          log.error(`FAILED CHECK: Hanzi ${checks[i]} is at level ${usr.sc[checks[i]] ? usr.sc[checks[i]].level : "DNE"}`);
+                          log.error(`FAILED CHECK: Hanzi ${checks[i]} is at level ${usr.sc[checks[i]].level}`);
                           break;
                         }
                       }
@@ -463,12 +458,12 @@ Lesson.prototype.advance = async function(message){
                           usr.lessons[this.lang].push(new queuedLesson(char, HSK, LEARN, Date.now()));
                         });
                         PAYLOAD[`next.hsk`] = usr.next.hsk + 1;
-                        const nextRadicals = await db.collection('radical').findOne({_id: `lv${usr.next.hskr}`});
+                        const nextRadicals = await db.collection('radical').findOne({_id: `lv${usr.next.radical}`});
                         nextRadicals.scn.forEach(char => {
-                          PAYLOAD[`hskr.${char}`]= new SRSObj();
+                          PAYLOAD[`radical.${char}`]= new SRSObj();
                           usr.lessons[this.lang].push(new queuedLesson(char, HSK_RA, LEARN, Date.now()));
                         });
-                        PAYLOAD[`next.hskr`] = usr.next.hskr + 1;
+                        PAYLOAD[`next.radical`] = usr.next.radical + 1;
                         if(nextRadicals.content.length === 0){
                           (await db.collection('sc').findOne({_id: `lv${usr.next.sc}`})).content.forEach(char => {
                             PAYLOAD[`sc.${char}`]= new SRSObj();
@@ -556,8 +551,8 @@ Lesson.prototype.advance = async function(message){
             if(currentLesson.requested === undefined){
               res = await db.collection('kanji').findOne({_id: currentLesson.char});
               currentLesson.todo = ["meaning"];
-              // if(res.onyomi && !res.kunyomi) currentLesson.todo.push("onyomi");
-              // if(res.kunyomi && !res.onyomi) currentLesson.todo.push("kunyomi");
+              if(res.onyomi && !res.kunyomi) currentLesson.todo.push("onyomi");
+              if(res.kunyomi && !res.onyomi) currentLesson.todo.push("kunyomi");
               const i = ~~(Math.random()*currentLesson.todo.length);
               currentLesson.requested = {
                 index: i,
@@ -584,7 +579,7 @@ Lesson.prototype.advance = async function(message){
               };
             }
             message.channel.send({embed: {
-              title: `${currentLesson.char} [${currentLesson.requested.text === "meaning" ? "📔" : "🗣️"}]`,
+              title: `${currentLesson.char} [${currentLesson.requested.text}]`,
               description: `Name this vocabulary's **${currentLesson.requested.text}**`,
               color: 0xe91e63
             }});
@@ -602,21 +597,6 @@ Lesson.prototype.advance = async function(message){
               title: `${currentLesson.char} [${ACRONYM[currentLesson.requested.text]}]`,
               description: `Name this hanzi's **${ACRONYM[currentLesson.requested.text]}**`,
               color: 0x9b59b6
-            }});
-            break;
-          case HSK:
-            if(currentLesson.requested === undefined){
-              currentLesson.todo = ["en", "py"];
-              const i = ~~(Math.random()*currentLesson.todo.length);
-              currentLesson.requested = {
-                index: i,
-                text: currentLesson.todo[i]
-              };
-            }
-            message.channel.send({embed: {
-              title: `${currentLesson.char} [${currentLesson.requested.text === "en" ? "📔" : "🗣️"}]`,
-              description: `Name this term's **${ACRONYM[currentLesson.requested.text]}**`,
-              color: 0xe91e63
             }});
             break;
         }
@@ -722,27 +702,22 @@ const cmds = {
 
       if(usr.lessons.jp){
         EMBED_FIELDS[0].value += `Radical ${formatLv(usr.next.radical-2)}\n${usr.next.kanji > 1 ? `Kanji ${formatLv(usr.next.kanji-2)}` : ""}\n${usr.next.vocab > 1 ? `Vocabulary ${formatLv(usr.next.vocab-2)}` : ""}`;
-        EMBED_FIELDS.push(new Field(`Radical Progress`, (await db.collection('radical').findOne({_id: `lv${usr.next.radical-1}`})).content.map(char => `${char} ${SRS_STAGE_ICON[Math.min(usr.radical[char].level, SRS_STAGE_ICON.length)]}`).join('  ')));
-        if(usr.next.kanji > 1) EMBED_FIELDS.push(new Field(`Kanji Progress`, (await db.collection('kanji').findOne({_id: `lv${usr.next.kanji-1}`})).content.sort((a,b) => usr.kanji[a].level-usr.kanji[b].level).map(char => `${char} ${SRS_STAGE_ICON[Math.min(usr.kanji[char].level, SRS_STAGE_ICON.length)]}`).join('  ')));
+        EMBED_FIELDS.push(new Field(`Radical Progress`, (await db.collection('radical').findOne({_id: `lv${usr.next.radical-1}`})).content.map(char => `${char} ${SRS_STAGE_ICON[Math.min(usr.radical[char].level, 5)]}`).join('  ')));
+        if(usr.next.kanji > 1) EMBED_FIELDS.push(new Field(`Kanji Progress`, (await db.collection('kanji').findOne({_id: `lv${usr.next.kanji-1}`})).content.map(char => `${char} ${SRS_STAGE_ICON[Math.min(usr.kanji[char].level, 5)]}`).join('  ')));
         if(usr.next.vocab > 1){
           EMBED_FIELDS.push(new Field(`Vocabulary Progress`, "", true), new Field(".", "", true), new Field(".", "", true));
-          try{
-            (await db.collection('vocab').findOne({_id: `lv${usr.next.vocab-1}`})).content.map(char => `${char.padEnd(4, '\u3000')} ${SRS_STAGE_ICON[Math.min(usr.vocab[char].level, SRS_STAGE_ICON.length)]}`).sort().forEach((prog,i) => EMBED_FIELDS[3+i%3].value += prog+"\n");
-          }catch(err){
-            (await db.collection('vocab').findOne({_id: `lv${usr.next.vocab-2}`})).content.map(char => `${char.padEnd(4, '\u3000')} ${SRS_STAGE_ICON[Math.min(usr.vocab[char].level, SRS_STAGE_ICON.length)]}`).sort().forEach((prog,i) => EMBED_FIELDS[3+i%3].value += prog+"\n");
-          }
+          (await db.collection('vocab').findOne({_id: `lv${usr.next.vocab-1}`})).content.map(char => `${char.padEnd(4, '\u3000')} ${SRS_STAGE_ICON[Math.min(usr.vocab[char].level, 5)]}`).sort().forEach((prog,i) => EMBED_FIELDS[3+i%3].value += prog+"\n");
         }
       }
       if(usr.lessons.hsk){
         EMBED_FIELDS[0].value += `Radical ${formatLv(usr.next.hskr-2)}\n${usr.next.sc > 1 ? `Hanzi (Simplified) ${formatLv(usr.next.sc-2)}` : ""}\n${usr.next.hsk > 1 ? `Vocabulary (HSK) ${formatLv(usr.next.hsk-2)}` : ""}`;
-        EMBED_FIELDS.push(new Field(`Radical Progress`, (await db.collection('radical').findOne({_id: `lv${usr.next.hskr-1}`})).scn.map(char => `${char} ${SRS_STAGE_ICON[Math.min(usr.hskr[char].level, SRS_STAGE_ICON.length)]}`).join('  ')));
-        if(usr.next.sc > 1) EMBED_FIELDS.push(new Field(`Hanzi (Simplified) Progress`, (await db.collection('sc').findOne({_id: `lv${usr.next.sc-1}`})).content.map(char => `${char} ${SRS_STAGE_ICON[Math.min(usr.sc[char].level, SRS_STAGE_ICON.length)]}`).join('  ')));
+        EMBED_FIELDS.push(new Field(`Radical Progress`, (await db.collection('radical').findOne({_id: `lv${usr.next.radical-1}`})).scn.map(char => `${char} ${SRS_STAGE_ICON[Math.min(usr.hskr[char].level, 5)]}`).join('  ')));
+        if(usr.next.sc > 1) EMBED_FIELDS.push(new Field(`Hanzi (Simplified) Progress`, (await db.collection('sc').findOne({_id: `lv${usr.next.sc-1}`})).content.map(char => `${char} ${SRS_STAGE_ICON[Math.min(usr.sc[char].level, 5)]}`).join('  ')));
         if(usr.next.hsk > 1){
-          EMBED_FIELDS.push(new Field(`Vocabulary`, "", true), new Field("(HSK)", "", true), new Field("Progress", "", true));
-          (await db.collection('hsk').findOne({_id: `lv${usr.next.hsk-1}`})).content.map(char => `${char.padEnd(4, '\u3000')} ${SRS_STAGE_ICON[Math.min(usr.hsk[char].level, SRS_STAGE_ICON.length)]}`).sort().forEach((prog,i) => EMBED_FIELDS[EMBED_FIELDS.length-3+i%3].value += prog+"\n");
+          EMBED_FIELDS.push(new Field(`Vocabulary (HSK) Progress`, "", true), new Field(".", "", true), new Field(".", "", true));
+          (await db.collection('hsk').findOne({_id: `lv${usr.next.hsk-1}`})).content.map(char => `${char.padEnd(4, '\u3000')} ${SRS_STAGE_ICON[Math.min(usr.hsk[char].level, 5)]}`).sort().forEach((prog,i) => EMBED_FIELDS[EMBED_FIELDS.length-1+i%3].value += prog+"\n");
         }
       }
-      console.log(EMBED_FIELDS)
       // console.log(EMBED_FIELDS);
       EMBED_FIELDS.forEach(E => E.value = E.value.replace("n/a", "").substring(0, 1023));
       message.channel.send({embed: {
@@ -775,7 +750,7 @@ const cmds = {
       } catch(e){log.error(e)}
     }
   },
-  lookup: { /* rewrite to return a promise if i ever have to cuz returning into an async function doesn't work */
+  lookup: {
     alias: ["l"],
     desc: "display query's dictionary details",
     params: "[type] [characater]",
@@ -793,107 +768,7 @@ const cmds = {
             color: RKV_EMBED_COLORING[type]
           }})
         }else{
-          let embed;
-          switch(type){
-            case "radical":
-              return message.channel.send({embed: {
-                title: `${query} - ${res.meaning}`,
-                description: `${res.mnemonic}`,
-                fields: [
-                  new Field("References", `[Wiktionary](https://en.wiktionary.org/wiki/${encodeURI(query)})`)
-                ],
-                color: 0x3498db,
-                thumbnail: {
-                  url: `http://en.ikanji.jp/user_data/images/upload/character/original/${encodeURI(query).replace(/%/g, '')}.png`
-                }
-              }});
-              break;
-            case "kanji":
-              return message.channel.send({embed: {
-                title: `${query} - ${res.meaning.replace(/,/g, ", ")}`,
-                description: `Radical: ${res.radical}`,
-                fields: [
-                  new Field("Onyomi", res.onyomi.replace(/,/g, '\u3001') || "n/a", true),
-                  new Field("Kunyomi", res.kunyomi.replace(/,/g, '\u3001') || "n/a", true),
-                  new Field("Mnemonic/Hint", res.mnemonic || "n/a"),
-                  new Field("Examples", res.examples.map(ex => ex.split('|')[0]).join('\n') || "n/a", true),
-                  new Field("Meaning", res.examples.map(ex => ex.split('|')[1]).join('\n') || "n/a", true),
-                  new Field("References", `[Jisho](https://jisho.org/search/${encodeURI(query)})\u30fb[KanjiAlive](https://app.kanjialive.com/${encodeURI(query)})\u30fb[Tangorin](https://tangorin.com/kanji/${encodeURI(query)})\u30fb[Wiktionary](https://en.wiktionary.org/wiki/${encodeURI(query)})`)
-                ],
-                color: 0x9b59b6,
-                thumbnail: {
-                  url: `http://en.ikanji.jp/user_data/images/upload/character/original/${encodeURI(query).replace(/%/g, '')}.png`
-                }
-              }});
-              break;
-            case "vocab":
-              const VO_EMBED = {
-                embed: {
-                  title: `${query}`,
-                  description: `Part of Speech: ${res.lexicalClass}`,
-                  fields: [
-                    new Field("Meaning", res.meaning.replace(/,/g, ", "), true),
-                    new Field("Reading", res.reading.replace(/,/g, ", "), true),
-                    new Field("Meaning Explanation", res.meaningExplanation || "n/a"),
-                    new Field("Reading Explanation", res.readingExplanation || "n/a"),
-                    new Field("Examples", res.context.map(ex => ex.split('|')[0]).join('\n') || "n/a", true),
-                    new Field("Meaning", res.context.map(ex => ex.split('|')[1]).join('\n') || "n/a", true),
-                    new Field("References", `[Jisho](https://jisho.org/search/${encodeURI(query)})\u30fb[Tangorin](https://tangorin.com/definition/${encodeURI(query)})\u30fb[WaniKani](https://www.wanikani.com/vocabulary/${encodeURI(query)})\u30fb[Wiktionary](https://en.wiktionary.org/wiki/${encodeURI(query)})`)
-                  ],
-                  color: 0xe91e63,
-                  thumbnail: {
-                    url: `http://en.ikanji.jp/user_data/images/upload/character/original/${encodeURI(query).replace(/%/g, '')}.png`
-                  }
-                }
-              };
-              if(res.recording !== null) VO_EMBED.files = [res.recording.split(',')[0]];
-              return message.channel.send(VO_EMBED);
-              break;
-            case "sc":
-              const SC_EMBED = {embed: {
-                title: `${query} - ${res.en.split(';')[0]}`,
-                description: `Radical: ${res.ra}`,
-                fields: [
-                  new Field("Pinyin", res.py.join('\u3001'), true),
-                  new Field("Zhuyin", (await zyc(res.py.join(' '))).join('\u3001').replace(/`/g, "\\`"), true),
-                  new Field("Definition", res.en),
-                  new Field("Context Examples", res.ex.map(ex => ex.replace('\u3010', "\u3010`").replace('\u3011|', "`\u3011*").trim() + '*').join('\n') || "n/a"),
-                  new Field("References", `[Cojak](http://www.cojak.org/index.php?function=code_lookup&term=${query.charCodeAt(0).toString(16).toUpperCase()})\u30fb[MDBG](https://www.mdbg.net/chinese/dictionary?wdqb=${encodeURI(query)})\u30fb[Purple Culture](https://www.purpleculture.net/dictionary-details/?word=${encodeURI(query)})\u30fb[Wiktionary](https://en.wiktionary.org/wiki/${encodeURI(query)})`)
-                ],
-                color: 0x9b59b6
-              }};
-              if(res.img) SC_EMBED.embed.thumbnail = { url: res.img };
-              else {
-                SC_EMBED.files = [{
-                  attachment: `https://dictionary.writtenchinese.com/giffile.action?&localfile=true&fileName=${encodeURI(encodeURI(query))}.gif`,
-                  name: `so.gif`
-                }];
-              }
-              embed = await message.channel.send(SC_EMBED);
-              if(!res.img) await db.collection('sc').updateOne({_id: query}, {$set: { img: embed.attachments.array()[0].url }}); // don't update if one exists already
-              return embed;
-              break;
-            case "hsk":
-              const HSK_EMBED = {
-                embed: {
-                  title: `${query}`,
-                  fields: [
-                    new Field("Pinyin", res.py, true),
-                    new Field("Zhuyin", (await zyc(res.py)).join('\n').replace(/`/g, "\\`"), true),
-                    new Field("Definition", res.en),
-                    new Field("Examples", res.ex.splice(0, 2).map(ex => ex.replace('\u3010', '\n').replace('\u3011', '').replace('|', '\n*"').trim() + '"*').join('\n\n') || "n/a"),
-                    new Field("Examples", res.ex.map(ex => ex.replace('\u3010', '\n').replace('\u3011', '').replace('|', '\n*"').trim() + '"*').join('\n\n') || "n/a"),
-                    new Field("References", `[MDBG](https://www.mdbg.net/chinese/dictionary?wdqb=${encodeURI(query)})\u30fb[Purple Culture](https://www.purpleculture.net/dictionary-details/?word=${encodeURI(query)})\u30fb[Written Chinese](https://dictionary.writtenchinese.com/#sk=${encodeURI(query)}&svt=pinyin)\u30fb[Wiktionary](https://en.wiktionary.org/wiki/${encodeURI(query)})`)
-                  ],
-                  color: 0xe91e63
-                },
-                files: ["https://dictionary.writtenchinese.com/sounds/" + (await pyc(res.py)).split(' ').map(p => p.match(/[1-4]$/) ? p : p+5).join('') + ".mp3"]
-              };
-              // HSK_EMBED.files = ["https://dictionary.writtenchinese.com/sounds/" + (await pyc(res.py)) + ".mp3"];
-              // console.log(HSK_EMBED);
-              return message.channel.send(HSK_EMBED);
-              break;
-          }
+          return message.channel.send(await infoLookup(RKV.indexOf(type), query));
         }
       }).catch(err => {throw err});
     }
@@ -957,19 +832,10 @@ const cmds = {
           lessons: usr.lessons[lang],
         };
         const newLessons = [];
-        let one = true;
         (await db.collection(TYPES[type].db).findOne({_id: "lv"+levelNumber}))[type==="hskr"?"scn":"content"].forEach(char => {
           PAYLOAD[`${type}.${char}`] = new SRSObj();
           PAYLOAD[`${type}.${char}`].level = 4;
           PAYLOAD[`${type}.${char}`].levelOld = 4;
-          let offset = 1; // if not forced, then everything is immediate (if it is, only the first one is as those set to 5 will have 10 minute cd)
-          if(message.content.includes("force")){
-            if(!one){
-              PAYLOAD[`${type}.${char}`].level = PAYLOAD[`${type}.${char}`].levelOld = 5;
-              offset = Date.now()+600000;
-            }
-            one = false;
-          }
           PAYLOAD[`${type}.${char}`].incorrect = 0;
           for(let i = PAYLOAD.lessons.length-1; i >= 0; i --){
             // console.log(PAYLOAD.lessons[i]);
@@ -978,7 +844,7 @@ const cmds = {
               //break;
             }
           }
-          newLessons.push(new queuedLesson(char, TYPES[type].id, REVIEW, offset));
+          newLessons.push(new queuedLesson(char, TYPES[type].id, REVIEW, Date.now()));
         });
         // console.log(newLessons);
         PAYLOAD.lessons.push(...newLessons);
@@ -994,7 +860,7 @@ const cmds = {
   initialize: {
     alias: ["init"],
     desc: "update for new user, idk its kinda dumb",
-    params: "[lang] (force|size)",
+    params: "[lang]",
     exec: (message, lang) => {
       if(lang !== "jp" && lang !== "hsk") return message.channel.send("```md\n# Supported Types\n+ jp\n+ hsk\n```");
       db.collection('user').findOne({_id: message.author.id}).then(async usr => {
@@ -1043,22 +909,21 @@ const cmds = {
         if(Object.keys(usr.lessons).length === 1) lang = Object.keys(usr.lessons)[0];
         if(usr.lessons[lang] === undefined) return message.channel.send(`No lesson for **${lang}**. Options: ${Object.keys(usr.lessons).join(', ')}`);
         if(usr.lessons[lang].length === 0) return message.react("\u2049\ufe0f");
-        if(intervals[message.author.id] === undefined){
+        if(intervals[message.author.id] !== undefined){
           intervals[message.author.id] = 1;
           setInterval(() => {
             message.author.send({embed: {title: "24HR Reminder", color: 0xf1c40f}});
           }, 8.64e7);
         }
-        if(usr.lessons[lang][0].time < Date.now()+(arg === "force"?8.64e7:0)){
+        if(usr.lessons[lang][0].time < Date.now()){
           const contents = [...new Array(9)].map(() => []);
           const availableLessons = [];
-          const LESSON_SIZE_OVERRIDE = parseInt(arg) || MAXIMUM_LESSON_SIZE;
           let lessonWeight = 0;
           for(let i = 0; i < usr.lessons[lang].length; i ++){
             const lesson = usr.lessons[lang][i];
             if(arg === "force"){
-                   if(lesson.time > Date.now()+8.64e7 || lessonWeight >= LESSON_SIZE_OVERRIDE) break;
-            } else if(lesson.time > Date.now() || lessonWeight >= LESSON_SIZE_OVERRIDE) break;
+                   if(lesson.time > Date.now()+8.64e7 || lessonWeight >= MAXIMUM_LESSON_SIZE) break;
+            } else if(lesson.time > Date.now() || lessonWeight >= MAXIMUM_LESSON_SIZE) break;
             // if(contents[lesson.type] === undefined) contents[lesson.type] = [];
             contents[lesson.type].push(lesson.lessonType === LEARN ? `**${lesson.char}**` : lesson.char);
             lessonWeight += TYPES[lesson.type].w; // Radicals have weight=1, kanji/vocab have weight=2
@@ -1088,7 +953,6 @@ const cmds = {
               LESSON_EMBED.embed.footer.text = `${contents[3].length}R\u30fb${contents[4].length}H\u30fb${contents[5].length}V`;
               break;
           }
-          LESSON_EMBED.embed.footer.text += `\u30fb${usr.lessons[lang].filter(l => l.time < Date.now()).length} / ${usr.lessons[lang].length}`;
           message.channel.send(LESSON_EMBED).then(async embed => {
             await embed.react("\u23ed\ufe0f");
             lessons[message.author.id] = new Lesson(message.author.id, lang, embed, availableLessons);
@@ -1111,25 +975,6 @@ const cmds = {
             }, usr.lessons[lang][0].time-Date.now());
           }
         }
-      });
-    }
-  },
-  queue: {
-    desc: "view planned lesson overview",
-    params: "[lang]",
-    exec: (message, lang) => {
-      db.collection('user').findOne({_id: message.author.id}).then(async usr => {
-        if(usr === null) return message.react("\u2049\ufe0f");
-        if(Object.keys(usr.lessons).length === 1) lang = Object.keys(usr.lessons)[0];
-        if(usr.lessons[lang] === undefined) return message.channel.send(`No lesson for **${lang}**. Options: ${Object.keys(usr.lessons).join(', ')}`);
-        if(usr.lessons[lang].length === 0) return message.react("\u2049\ufe0f");
-        console.log(usr.lessons[lang]);
-        message.channel.send({embed: {
-          title: "Queue Contents",
-          description: usr.lessons[lang].slice(0, 32).map(l => `${l.char.padEnd(4, '\u3000')} ${(Math.max(0, (l.time-Date.now()))/3.6e6).toFixed(1)} hrs`).join('\n'), //  ${SRS_STAGE_ICON[(usr[TYPES[l.type].db][l.char].level)]}
-          timestamp: Date.now(),
-          color: 0xf1c40f,
-        }});
       });
     }
   },

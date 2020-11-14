@@ -1,0 +1,24 @@
+https://kanjialive.com/214-traditional-kanji-radicals/
+https://www.learn-japanese-adventure.com/how-to-determine-onyomi-and-kunyomi-of-each-kanji-character.html
+https://www.mandarintutor.com/resources/commonradicals
+https://chinese.stackexchange.com/questions/1300/is-there-a-site-that-can-split-characters-into-radicals
+https://www.mdbg.net/chinese/dictionary?page=worddict&wdrst=1&wdqb=%E5%A4%8F
+
+https://www.learn-japanese-adventure.com/how-to-determine-onyomi-and-kunyomi-of-each-kanji-character.html
+
+https://jisho.org/
+https://app.kanjialive.com/
+https://tangorin.com/
+https://www.wanikani.com/
+
+https://stackoverflow.com/questions/15033196/using-javascript-to-check-whether-a-string-contains-japanese-characters-includi
+
+https://raw.githubusercontent.com/tomcumming/tocfl-word-list/master/dist/tocfl.csv
+
+https://www.purpleculture.net/wordjson.php?word=暴露
+https://hsk.academy/en/words/%E5%87%BA%E7%A7%9F%E8%BD%A6
+
+https://dictionary.writtenchinese.com/giffile.action?&localfile=true&fileName=%25E5%2590%2583.gif
+
+http://www.cojak.org/index.php?function=code_lookup&term=4E0A
+Array.from(document.getElementsByClassName("main")[1].getElementsByTagName("tr")).splice(1, 20).filter(tr => tr.getElementsByTagName("td")[0].className !== "hanziwordt").splice(0, 10).map(tr => `${tr.getElementsByTagName("td")[0].innerHTML.replace(/<[/]?a[^>]*>/g,"")}\u3010${Array.from(tr.getElementsByTagName("td")[1].getElementsByTagName("a")).map(a => a.innerHTML.replace(/<[/]?a[^>]*>/g,"")).join('')}\u3011|${tr.getElementsByTagName("td")[1].innerHTML.split("]&nbsp;&nbsp;&nbsp;")[1]}`); // cojak parser for examples
