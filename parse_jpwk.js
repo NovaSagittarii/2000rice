@@ -12,7 +12,7 @@ const url = 'mongodb://localhost:27017';
 const kxr = JSON.parse(fs.readFileSync("./data/kangxiradicals.json", 'utf8'));
 const stages = ["pleasant", "painful", "death", "hell", "paradise", "reality"];
 
-const LIMITER = 38;
+const LIMITER = 60;
 
 let db;
 MongoClient.connect(url, { useNewUrlParser: true, useUnifiedTopology: true }, function(err, mongoclient) {
@@ -23,7 +23,7 @@ MongoClient.connect(url, { useNewUrlParser: true, useUnifiedTopology: true }, fu
 });
 
 async function parse(){
-  for(let s = 0; s < stages.length; s ++){
+  for(let s = 6; s < stages.length; s ++){
     if(s*10 > LIMITER) break;
     {
       log.info(`Parsing radicals/${stages[s]}...`);

@@ -152,7 +152,7 @@ function formatLv(lv){
   return `${String.fromCharCode(945+Math.floor(lv/5))}-${"i ii iii iv v vi vii viii ix x".split(' ')[lv%5]}`;
 }
 
-function Lesson(uid, lang, message, contents){
+function Lesson(uid, lang, message, contents, force){
   this.id = uid;
   this.lang = lang;
   this.message = message;
@@ -169,12 +169,19 @@ function Lesson(uid, lang, message, contents){
   this.xpGain = 0;
   this.announcement = "";
   this.prevState = NOT_STARTED_YET;
+  this.start = Date.now();
+  if(force)
+    this.activiti = setInterval(this.pinguser = (() => this.channel.send(`<@!${this.id}> ${Date.now()-this.start > 25*60*1000 ? "frock" : ""}`)), 59000);
 }
 Lesson.prototype.advance = async function(message){
   if(this.contents.length){
     const currentLesson = this.contents[0];
     // console.log(currentLesson); // DEBUG
     this.prevState = currentLesson.lessonType;
+    if(this.activiti){
+      clearInterval(this.activiti);
+      this.activiti = setInterval(this.pinguser, 59000);
+    }
     if(currentLesson.lessonType === LEARN){
       const lessonMessage = await (async function(){
         const res = await db.collection(RKV[currentLesson.type]).findOne({_id: currentLesson.char});
@@ -326,7 +333,8 @@ Lesson.prototype.advance = async function(message){
         if(correct){
           this.correct ++;
           {
-            const xpGain = 2+Math.ceil(Math.random()*3);
+            const d = new Date().getDay();
+            const xpGain = (2+Math.ceil(Math.random()*3)) * (d===0||d>=5 ? 2 : 1);
             this.xpGain += xpGain;
             usr.xp += xpGain; // 2 + [1,3] => [3,5]
           }
@@ -545,7 +553,7 @@ Lesson.prototype.advance = async function(message){
           case HSK_RA:
             message.channel.send({embed: {
               title: currentLesson.char,
-              description: "Name the radical's meaning.",
+              description: currentLesson.type == RA ? "この部首の meaning を入力してください" : "Name the radical's meaning.",
               color: 0x3498db,
               thumbnail: {
                 url: `http://en.ikanji.jp/user_data/images/upload/character/original/${encodeURI(currentLesson.char).replace(/%/g, '')}.png`
@@ -566,7 +574,7 @@ Lesson.prototype.advance = async function(message){
             }
             message.channel.send({embed: {
               title: currentLesson.char,
-              description: `Name the kanji's **${currentLesson.requested.text}**`,
+              description: `この漢字の **${currentLesson.requested.text}** を入力してください`,
               color: 0x9b59b6,
               thumbnail: {
                 url: `http://en.ikanji.jp/user_data/images/upload/character/original/${encodeURI(currentLesson.char).replace(/%/g, '')}.png`
@@ -585,7 +593,7 @@ Lesson.prototype.advance = async function(message){
             }
             message.channel.send({embed: {
               title: `${currentLesson.char} [${currentLesson.requested.text === "meaning" ? "📔" : "🗣️"}]`,
-              description: `Name this vocabulary's **${currentLesson.requested.text}**`,
+              description: `この単語の **${currentLesson.requested.text}** を入力してください`,
               color: 0xe91e63
             }});
             break;
@@ -643,7 +651,7 @@ Lesson.prototype.advance = async function(message){
       }});
     }
     this.terminate(message);
-    refresh();
+    // refresh();
   }
   /* const cp = Object.assign({}, this);
   delete cp.channel;
@@ -656,6 +664,7 @@ Lesson.prototype.terminate = function(message){
     description: `Accuracy: ${(this.correct/this.attempts*100).toFixed(1)}% (${this.correct} / ${this.attempts})\nTerms in Session: ${this.size}\n*+${this.xpGain}XP*${this.announcement ? "\n\n"+this.announcement : ""}`,
     color: 0x2ecc71
   }});
+  if(this.activiti) clearInterval(this.activiti);
   delete lessons[this.id];
 };
 
@@ -676,6 +685,18 @@ const cmds = {
           title: "Commands",
           description: helpcmdtext
         }})
+      }
+    }
+  },
+  next: {
+    desc: "Advances a lesson",
+    exec: async (message) => {
+      let L = lessons[message.author.id];
+      if(L && message.channel.id === L.message.channel.id && (L.contents[0].lessonType === LEARN || L.prevState === LEARN || L.prevState === NOT_STARTED_YET)){
+        await L.message.edit({embed: {
+          description: "*marked as read*"
+        }});
+        L.advance(message);
       }
     }
   },
@@ -707,6 +728,13 @@ const cmds = {
           }})
         });
       })
+    }
+  },
+  day: {
+    desc: "b",
+    exec: msg => {
+      const d = new Date().getDay();
+      msg.channel.send(`forecast: ${((d==0||d>=5?2:1)).toFixed(2)}x`);
     }
   },
   profile: {
@@ -1061,7 +1089,7 @@ const cmds = {
             } else if(lesson.time > Date.now() || lessonWeight >= LESSON_SIZE_OVERRIDE) break;
             // if(contents[lesson.type] === undefined) contents[lesson.type] = [];
             contents[lesson.type].push(lesson.lessonType === LEARN ? `**${lesson.char}**` : lesson.char);
-            lessonWeight += TYPES[lesson.type].w; // Radicals have weight=1, kanji/vocab have weight=2
+            lessonWeight += (+!!arg || TYPES[lesson.type].w) * (lesson.lessonType === LEARN ? 1 : 0.2); // Radicals have weight=1, kanji/vocab have weight=2
             availableLessons.push(lesson);
           }
           const LESSON_EMBED = {embed: {
@@ -1091,7 +1119,8 @@ const cmds = {
           LESSON_EMBED.embed.footer.text += `\u30fb${usr.lessons[lang].filter(l => l.time < Date.now()).length} / ${usr.lessons[lang].length}`;
           message.channel.send(LESSON_EMBED).then(async embed => {
             await embed.react("\u23ed\ufe0f");
-            lessons[message.author.id] = new Lesson(message.author.id, lang, embed, availableLessons);
+            if(lessons[message.author.id] && lessons[message.author.id].activiti) clearInterval(lessons[message.author.id].activiti);
+            lessons[message.author.id] = new Lesson(message.author.id, lang, embed, availableLessons, message.author.id === "294115380916649986" || message.content.includes("--remind"));
           });
         }else{
           message.channel.send({embed: {
@@ -1153,13 +1182,23 @@ MongoClient.connect(process.env.DB_LINK, { useNewUrlParser: true, useUnifiedTopo
 });
 
 let sid, mention;
-let sdto; function refresh(){ clearTimeout(sdto); sdto = setTimeout(async () => { await client.destroy(); log.info("CRLF - Client timeout"); process.exit(); }, 1.728e8); log.pass(`updated to ${Date.now()+1.728e8}`); }
+let sdto;
+function refresh(n){
+  clearTimeout(sdto);
+  sdto = setTimeout(async () => {
+    await client.destroy();
+    log.info("CRLF - Client timeout"); process.exit();
+  }, n ? n-Date.now() : 2.592e+8);
+  if(!n) fs.writeFileSync("./time", (Date.now()+2.592e+8).toString());
+  log.pass(`updated to ${n || Date.now()+2.592e+8}`);
+  client.user.setActivity(`Til ${new Date(n || Date.now()+2.592e+8)}`);
+}
 client.on("ready", () => {
   sid = client.user.id;
   mention = `<@!${sid}>`;
   log.pass(`Logged in as ${client.user.tag} - ${sid}`);
-  client.user.setPresence({ game: { name: 'a', type: 0} });
-  refresh();
+  client.user.setPresence({ game: { name: 'bot is deprecated but idk its up atm', type: 0} });
+  // refresh(parseInt(fs.readFileSync("./time")));
 });
 client.on('message', (message) => {
   if(message.author.id === client.user.id || message.author.bot || message.author.createdAt > MINIMUM_AGE) return;
